@@ -17,6 +17,38 @@ SHAPE_MAP = {
     "parallelogram": ("[/", "/]"),
 }
 
+COLOR_PALETTE = {
+    "Start/Initial": "#D1FAE5",
+    "End/Terminal": "#FEE2E2",
+    "Success Green": "#32BE66FF",
+    "Danger Red": "#DB5656FF",
+    "Warning Amber": "#CF9D46FF",
+    "Decision Yellow": "#FEF3C7",
+    "Database Indigo": "#E0E7FF",
+    "External System Purple": "#F3E8FF",
+    "User Blue": "#DBEAFE",
+    "Blue": "#3B82F6",
+    "Light Blue": "#93C5FD",
+    "Dark Blue": "#1E3A8A",
+    "Green": "#10B981",
+    "Light Green": "#A7F3D0",
+    "Dark Green": "#064E3B",
+    "Red": "#EF4444",
+    "Light Red": "#FCA5A5",
+    "Dark Red": "#7F1D1D",
+    "Purple": "#8B5CF6",
+    "Light Purple": "#C4B5FD",
+    "Pink": "#EC4899",
+    "Light Pink": "#FBCFE8",
+    "Orange": "#F97316",
+    "Light Orange": "#FFEDD5",
+    "Yellow": "#FDE047",
+    "White": "#FFFFFF",
+    "Light Gray": "#F3F4F6",
+    "Gray": "#9CA3AF",
+    "Dark Gray": "#374151"
+}
+
 # --- 2. GUI SETUP ---
 st.set_page_config(page_title="AI Mermaid Diagrammer", layout="wide")
 st.title("AI Diagram Generator")
