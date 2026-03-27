@@ -30,9 +30,9 @@ COLOR_PALETTE = {
     "Blue": "#3B82F6",
     "Light Blue": "#93C5FD",
     "Dark Blue": "#1E3A8A",
-    "Green": "#10B981",
-    "Light Green": "#A7F3D0",
-    "Dark Green": "#064E3B",
+    "Green": "#10B92F",
+    "Light Green": "#A7F3B6",
+    "Dark Green": "#064A1B",
     "Red": "#EF4444",
     "Light Red": "#FCA5A5",
     "Dark Red": "#7F1D1D",
@@ -157,12 +157,16 @@ def get_diagram_aesthetics(prompt, current_structure, model):
     # Extract only necessary info to keep the LLM focused
     nodes_to_style = [{"id": n["id"], "label": n["label"]} for n in current_structure.get('nodes', [])]
 
+    # Format palette for the prompt
+    palette_str = ", ".join([f"{name} ({code})" for name, code in COLOR_PALETTE.items()])
+
     system_msg = (
         "You are a visual designer. Your ONLY task is to assign a 'shape' and 'color' to the provided nodes.\n"
         "Rules:\n"
         f"1. Choose 'shape' from: {list(SHAPE_MAP.keys())}.\n"
         "   - Use 'rhombus' for decisions, 'database' for storage, 'stadium' for start/end.\n"
-        "2. Choose 'color' as a HEX code (e.g., #f9f).\n"
+        f"2. Choose 'color' ONLY from this semantic palette (HEX codes): {palette_str}.\n"
+        "   - Pick the color that best matches the node's purpose (e.g., Red for errors, Green for success).\n"
         "3. DO NOT change 'id' or 'label'. DO NOT add or remove nodes.\n"
         "Output ONLY valid JSON: {'nodes': [{'id': '...', 'shape': '...', 'color': '...'}]}"
     )
@@ -191,7 +195,10 @@ def get_diagram_aesthetics(prompt, current_structure, model):
             style_info = style_lookup.get(str(node.get('id')))
             if style_info:
                 node['shape'] = style_info.get('shape', node.get('shape', 'default'))
-                node['color'] = style_info.get('color', node.get('color', ''))
+                
+                # Extract HEX if AI returned name+hex or just hex
+                raw_color = style_info.get('color', node.get('color', ''))
+                node['color'] = raw_color
                 
         return current_structure
     except Exception as e:
@@ -288,7 +295,7 @@ if style_btn:
 
 # Display Results
 if st.session_state.structured_data:
-    col1, col2 = st.columns([1, 2])
+    col1, col2 = st.columns([2, 3])
     
     with col1:
         st.subheader("Interactive Editor")
@@ -296,11 +303,17 @@ if st.session_state.structured_data:
         
         # Nodes Editor
         st.write("**Nodes**")
-        nodes_df = pd.DataFrame(st.session_state.structured_data.get('nodes', []))
-        for col in ['id', 'label', 'shape', 'color']:
-            if col not in nodes_df.columns: nodes_df[col] = ""
+        nodes_list = st.session_state.structured_data.get('nodes', [])
+        nodes_df = pd.DataFrame(nodes_list)
         
-        edited_nodes = st.data_editor(
+        # Normalize nodes_df columns
+        node_cols = ['id', 'label', 'shape', 'color']
+        for col in node_cols:
+            if col not in nodes_df.columns:
+                nodes_df[col] = ""
+        nodes_df = nodes_df[node_cols].fillna("")
+
+        edited_nodes_df = st.data_editor(
             nodes_df, 
             num_rows="dynamic", 
             use_container_width=True,
@@ -313,23 +326,42 @@ if st.session_state.structured_data:
         
         # Edges Editor
         st.write("**Edges (Connections)**")
-        edges_df = pd.DataFrame(st.session_state.structured_data.get('edges', []))
-        for col in ['from', 'to', 'label']:
-            if col not in edges_df.columns: edges_df[col] = ""
+        edges_list = st.session_state.structured_data.get('edges', [])
+        edges_df = pd.DataFrame(edges_list)
+        
+        # Normalize edges_df columns
+        edge_cols = ['from', 'to', 'label']
+        for col in edge_cols:
+            if col not in edges_df.columns:
+                edges_df[col] = ""
+        edges_df = edges_df[edge_cols].fillna("")
 
-        edited_edges = st.data_editor(edges_df, num_rows="dynamic", use_container_width=True, key="edge_editor")
+        edited_edges_df = st.data_editor(
+            edges_df, 
+            num_rows="dynamic", 
+            use_container_width=True, 
+            key="edge_editor"
+        )
         
         # Sync logic
-        new_nodes = edited_nodes.to_dict('records')
-        new_edges = edited_edges.to_dict('records')
+        new_nodes = edited_nodes_df.fillna("").to_dict('records')
+        new_edges = edited_edges_df.fillna("").to_dict('records')
         
-        if (new_nodes != st.session_state.structured_data.get('nodes') or 
-            new_edges != st.session_state.structured_data.get('edges') or
+        has_changes = False
+        if (new_nodes != nodes_list or 
+            new_edges != edges_list or
             st.session_state.get('last_orientation') != current_orientation):
-            
-            st.session_state.structured_data.update({'nodes': new_nodes, 'edges': new_edges, 'type': f"flowchart {current_orientation}"})
+            has_changes = True
+
+        if has_changes:
+            st.session_state.structured_data.update({
+                'nodes': new_nodes, 
+                'edges': new_edges, 
+                'type': f"flowchart {current_orientation}"
+            })
             st.session_state.mermaid_code = convert_to_mermaid(st.session_state.structured_data, current_orientation)
             st.session_state['last_orientation'] = current_orientation
+            st.rerun()
 
         with st.expander("Raw Data"):
             st.json(st.session_state.structured_data)
