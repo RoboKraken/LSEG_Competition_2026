@@ -3,6 +3,8 @@ import ollama
 import json
 import streamlit.components.v1 as components
 import pandas as pd
+import base64
+import requests
 
 # --- 1. CONSTANTS & CONFIG ---
 SHAPE_MAP = {
@@ -63,6 +65,61 @@ with st.sidebar:
     st.divider()
     st.subheader("Global Settings")
     diag_orientation = st.radio("Diagram Orientation", ["TD (Top-Down)", "LR (Left-Right)"], index=0)
+    
+    st.divider()
+    st.subheader("Import / Export")
+    
+    # Export JSON
+    if st.session_state.get('structured_data'):
+        json_str = json.dumps(st.session_state.structured_data, indent=2)
+        st.download_button(
+            label="Export JSON",
+            data=json_str,
+            file_name="diagram_structure.json",
+            mime="application/json",
+            use_container_width=True
+        )
+        
+        # Save as Image
+        if st.session_state.get('mermaid_code'):
+            try:
+                # Use a session state key to keep the download button visible
+                if st.button("Generate PNG Image", use_container_width=True):
+                    b64_code = base64.b64encode(st.session_state.mermaid_code.encode('utf-8')).decode('utf-8')
+                    img_url = f"https://mermaid.ink/img/{b64_code}"
+                    
+                    with st.spinner("Fetching image..."):
+                        img_resp = requests.get(img_url)
+                        if img_resp.status_code == 200:
+                            st.session_state.png_content = img_resp.content
+                        else:
+                            st.error(f"Failed to fetch image: {img_resp.status_code}")
+                
+                if 'png_content' in st.session_state:
+                    st.download_button(
+                        "Download PNG", 
+                        st.session_state.png_content, 
+                        "diagram.png", 
+                        "image/png",
+                        use_container_width=True
+                    )
+            except Exception as e:
+                st.error(f"Image error: {e}")
+
+    # Import JSON
+    uploaded_file = st.file_uploader("Import JSON", type=["json"])
+    if uploaded_file is not None:
+        try:
+            imported_data = json.load(uploaded_file)
+            if isinstance(imported_data, dict) and 'nodes' in imported_data and 'edges' in imported_data:
+                st.session_state.structured_data = imported_data
+                st.session_state.mermaid_code = convert_to_mermaid(imported_data)
+                st.success("Imported successfully!")
+                st.rerun()
+            else:
+                st.error("Invalid JSON structure. Must contain 'nodes' and 'edges'.")
+        except Exception as e:
+            st.error(f"Import error: {e}")
 
 user_prompt = st.text_area(
     "Describe your process, system, or flow:",
