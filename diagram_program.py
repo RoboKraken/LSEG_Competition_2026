@@ -20,7 +20,11 @@ user_prompt = st.text_area(
     height=150
 )
 
-run_btn = st.button("Generate Diagram", type="primary")
+col_btn1, col_btn2 = st.columns([1, 4])
+with col_btn1:
+    run_btn = st.button("Generate Diagram", type="primary")
+with col_btn2:
+    check_btn = st.button("Check")
 
 # --- 2. HELPERS ---
 
@@ -43,7 +47,7 @@ def render_mermaid(code):
 def get_diagram_structure(prompt, model):
     """Calls Ollama to get a structured JSON representation of the diagram."""
     system_msg = (
-        "You are a technical architect. Analyze the user's natural language description "
+        "You are a diagram architect. Analyze the user's natural language description "
         "and infer a logical diagram structure. Output ONLY valid JSON.\n"
         "The JSON must follow this structure:\n"
         "{\n"
@@ -64,6 +68,37 @@ def get_diagram_structure(prompt, model):
     
     return json.loads(response['response'])
 
+def check_diagram_structure(prompt, current_structure, current_mermaid, model):
+    """Calls Ollama to verify and refine the diagram structure against the current prompt."""
+    system_msg = (
+        "You are a quality assurance architect. Your task is to verify if the current Mermaid diagram "
+        "and its JSON structure perfectly match the LATEST user description. If the description has changed "
+        "or if there are errors, missing steps, or logical inconsistencies, provide a corrected and "
+        "optimized version. Be thorough. Output ONLY valid JSON.\n"
+        "The JSON must follow this structure:\n"
+        "{\n"
+        "  'type': 'graph TD' or 'graph LR',\n"
+        "  'nodes': [{'id': 'unique_id', 'label': 'display_text'}],\n"
+        "  'edges': [{'from': 'source_id', 'to': 'target_id', 'label': 'optional_text'}]\n"
+        "}"
+    )
+    
+    full_prompt = (
+        f"System: {system_msg}\n"
+        f"LATEST User Description: {prompt}\n"
+        f"Current Mermaid Code:\n{current_mermaid}\n"
+        f"Current JSON Structure: {json.dumps(current_structure)}\n"
+        f"Please compare the structure against the LATEST description and provide the final improved JSON structure."
+    )
+    
+    response = ollama.generate(
+        model=model,
+        prompt=full_prompt,
+        format='json'
+    )
+    
+    return json.loads(response['response'])
+
 def convert_to_mermaid(data):
     """Converts the structured JSON into Mermaid.js syntax."""
     # Using 'flowchart' instead of 'graph' for better v10+ compatibility
@@ -72,30 +107,38 @@ def convert_to_mermaid(data):
     
     def safe_id(id_val):
         # Mermaid IDs cannot start with a number or contain special chars easily
-        # We prefix with 'n' if it starts with a digit
-        id_str = str(id_val)
+        id_str = str(id_val) if id_val is not None else "unknown"
         if id_str and id_str[0].isdigit():
             return f"n{id_str}"
         return id_str
 
     # Define Nodes
     for node in data.get('nodes', []):
-        nid = safe_id(node['id'])
+        nid = safe_id(node.get('id', 'unknown'))
         label = node.get('label', '')
-        # If label is empty, use the ID or a space to avoid syntax errors
         label_text = f"\"{label}\"" if label else f"\"{nid}\""
         lines.append(f"    {nid}[{label_text}]")
     
     # Define Edges
     for edge in data.get('edges', []):
-        source = safe_id(edge['from'])
-        target = safe_id(edge['to'])
+        # Using .get() to prevent KeyError if model returns 'source'/'target' or missing keys
+        source = safe_id(edge.get('from', edge.get('source', '')))
+        target = safe_id(edge.get('to', edge.get('target', '')))
+        if not source or not target:
+            continue
+            
         label = f"|{edge['label']}| " if edge.get('label') else ""
         lines.append(f"    {source} --> {label}{target}")
         
     return "\n".join(lines)
 
 # --- 3. EXECUTION ---
+
+# Initialize session state
+if 'structured_data' not in st.session_state:
+    st.session_state.structured_data = None
+if 'mermaid_code' not in st.session_state:
+    st.session_state.mermaid_code = None
 
 if run_btn:
     if not user_prompt:
@@ -104,32 +147,58 @@ if run_btn:
         with st.spinner("DeepSeek is analyzing the logic and structuring the diagram..."):
             try:
                 # Step 1: Get JSON from AI
-                structured_data = get_diagram_structure(user_prompt, model_name)
-                
+                st.session_state.structured_data = get_diagram_structure(user_prompt, model_name)
                 # Step 2: Convert to Mermaid syntax
-                mermaid_code = convert_to_mermaid(structured_data)
+                st.session_state.mermaid_code = convert_to_mermaid(st.session_state.structured_data)
+                st.rerun() # Ensure UI refreshes with new data
+            except Exception as e:
+                st.error(f"An error occurred during generation: {str(e)}")
+
+if check_btn:
+    if not user_prompt:
+        st.warning("Please enter a description first.")
+    elif not st.session_state.structured_data:
+        st.warning("Please generate a diagram first before checking.")
+    else:
+        with st.spinner("DeepSeek is verifying and refining the diagram..."):
+            try:
+                # Step 1: Check/Refine JSON from AI
+                new_data = check_diagram_structure(
+                    user_prompt, 
+                    st.session_state.structured_data, 
+                    st.session_state.mermaid_code,
+                    model_name
+                )
                 
-                # Step 3: Display Results
-                col1, col2 = st.columns([1, 2])
-                
-                with col1:
-                    st.subheader("Inferred Structure")
-                    st.json(structured_data)
-                    
-                    st.subheader("Mermaid Syntax")
-                    st.code(mermaid_code, language="mermaid")
-                
-                with col2:
-                    st.subheader("Visual Diagram")
-                    # Show the rendered diagram
-                    render_mermaid(mermaid_code)
+                # Check if data actually changed to provide feedback
+                if new_data != st.session_state.structured_data:
+                    st.session_state.structured_data = new_data
+                    st.session_state.mermaid_code = convert_to_mermaid(st.session_state.structured_data)
+                    st.success("Diagram updated based on the current prompt!")
+                else:
+                    st.info("The current diagram already matches the prompt perfectly.")
                     
             except Exception as e:
-                st.error(f"An error occurred: {str(e)}")
-                st.info("Sometimes the model might return malformed JSON. Try clicking Generate again.")
+                st.error(f"An error occurred during verification: {str(e)}")
+
+# Display Results if they exist in session state
+if st.session_state.structured_data and st.session_state.mermaid_code:
+    col1, col2 = st.columns([1, 2])
+    
+    with col1:
+        st.subheader("Inferred Structure")
+        st.json(st.session_state.structured_data)
+        
+        st.subheader("Mermaid Syntax")
+        st.code(st.session_state.mermaid_code, language="mermaid")
+    
+    with col2:
+        st.subheader("Visual Diagram")
+        # Show the rendered diagram
+        render_mermaid(st.session_state.mermaid_code)
 
 # --- 4. INSTRUCTIONS ---
-else:
+if not st.session_state.structured_data:
     st.write("---")
     st.markdown("""
     ### How it works:
